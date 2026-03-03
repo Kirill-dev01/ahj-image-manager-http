@@ -4,25 +4,25 @@ export default class ImageManager {
         this.dropZone = document.getElementById('drop-zone');
         this.fileInput = document.getElementById('file-input');
         this.previewContainer = document.getElementById('preview-container');
+        
+        // Создаем массив для хранения информации о текущих файлах
+        this.currentFiles = []; 
+        
         this.init();
     }
 
     init() {
-        // 0. При загрузке страницы сразу запрашиваем список картинок с сервера
         this.loadImages();
 
-        // 1. Обработка клика
         this.dropZone.addEventListener('click', () => {
             this.fileInput.click();
         });
 
-        // 2. Файлы выбраны через стандартное окно
         this.fileInput.addEventListener('change', (e) => {
             this.processFiles(e.target.files);
             this.fileInput.value = '';
         });
 
-        // 3. Native Drag and Drop
         this.dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             this.dropZone.classList.add('dragover');
@@ -40,11 +40,20 @@ export default class ImageManager {
         });
     }
 
-    // Общая функция подготовки файлов
     processFiles(files) {
         Array.from(files).forEach(file => {
             if (!file.type.startsWith('image/')) return;
-            this.uploadFile(file); // Отправляем файл на сервер
+
+            // Проверка на дубликаты
+            // Сравниваем имя выбранного файла с именами тех, что уже лежат в массиве currentFiles
+            const isDuplicate = this.currentFiles.some(existingFile => existingFile.filename === file.name);
+            
+            if (isDuplicate) {
+                alert(`Файл "${file.name}" уже был загружен ранее! Выберите другой файл.`);
+                return; // Прерываем выполнение, файл не отправляется на сервер
+            }
+
+            this.uploadFile(file); 
         });
     }
 
@@ -53,17 +62,26 @@ export default class ImageManager {
     async loadImages() {
         try {
             const response = await fetch(`${this.apiUrl}/files`);
+            
+            // Проверка на ошибки HTTP
+            if (!response.ok) {
+                throw new Error(`Ошибка HTTP: ${response.status}`);
+            }
+            
             const files = await response.json();
+            
+            // Сохраняем загруженные файлы в наш массив
+            this.currentFiles = files; 
+            
             this.previewContainer.innerHTML = '';
-            // Рисуем все картинки, которые вернул сервер
             files.forEach(fileData => this.renderImage(fileData));
         } catch (e) {
-            console.error('Ошибка загрузки картинок. Убедитесь, что сервер запущен на 7070', e);
+            console.error('Ошибка при загрузке картинок:', e);
+            alert('Не удалось загрузить список картинок с сервера.');
         }
     }
 
     async uploadFile(file) {
-        // Упаковываем файл в объект FormData (для отправки файлов через fetch)
         const formData = new FormData();
         formData.append('file', file);
 
@@ -72,20 +90,41 @@ export default class ImageManager {
                 method: 'POST',
                 body: formData
             });
+            
+            // Проверка на ошибки HTTP
+            if (!response.ok) {
+                throw new Error(`Ошибка HTTP: ${response.status}`);
+            }
+            
             const newFile = await response.json();
-            this.renderImage(newFile); // Рисуем картинку только после ответа сервера
+            
+            // Добавляем успешно загруженный файл в наш массив, чтобы он учитывался при проверке на дубликаты
+            this.currentFiles.push(newFile); 
+            
+            this.renderImage(newFile); 
         } catch (e) {
-            console.error('Ошибка загрузки файла', e);
+            console.error('Ошибка при загрузке файла:', e);
+            alert(`Не удалось загрузить файл "${file.name}" на сервер.`);
         }
     }
 
     async deleteImage(id, previewElement) {
         try {
-            await fetch(`${this.apiUrl}/files/${id}`, { method: 'DELETE' });
-            // Удаляем из HTML только если сервер ответил статусом 204
+            const response = await fetch(`${this.apiUrl}/files/${id}`, { method: 'DELETE' });
+            
+            // Проверка на ошибки HTTP
+            if (!response.ok) {
+                throw new Error(`Ошибка HTTP: ${response.status}`);
+            }
+            
+            // Удаляем из HTML
             previewElement.remove();
+            
+            // Удаляем файл из нашего массива текущих файлов
+            this.currentFiles = this.currentFiles.filter(f => f.id !== id);
         } catch (e) {
-            console.error('Ошибка удаления', e);
+            console.error('Ошибка при удалении файла:', e);
+            alert('Не удалось удалить картинку. Попробуйте еще раз.');
         }
     }
 
@@ -102,7 +141,6 @@ export default class ImageManager {
         deleteBtn.className = 'delete-btn';
         deleteBtn.textContent = '✖';
 
-        // Удаление по клику
         deleteBtn.addEventListener('click', () => {
             this.deleteImage(fileData.id, previewItem);
         });
